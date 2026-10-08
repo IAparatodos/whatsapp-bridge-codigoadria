@@ -707,7 +707,8 @@ func sendAllowed(jid string) bool {
 		return false
 	}
 	for _, a := range allowed {
-		if a == jid {
+		// "*" opens sends to any contact (client installs, like the Pipedrive WhatsApp integration).
+		if a == jid || a == "*" {
 			return true
 		}
 	}
@@ -884,6 +885,11 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 }
 
 func main() {
+	chdirToExecutable()
+	if len(os.Args) > 1 && os.Args[1] == "send" {
+		os.Exit(runSendCommand(os.Args[2:]))
+	}
+
 	// Set up logger
 	logger := waLog.Stdout("Client", "INFO", true)
 	logger.Infof("Starting WhatsApp client...")
@@ -975,7 +981,9 @@ func main() {
 				fmt.Println("\nScan this QR code with your WhatsApp app:")
 				fmt.Printf("QR-CODE-DATA:%s\n", evt.Code)
 				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+				showQRPage(evt.Code)
 			} else if evt.Event == "success" {
+				showQRConnected()
 				connected <- true
 				break
 			}
@@ -985,7 +993,7 @@ func main() {
 		select {
 		case <-connected:
 			fmt.Println("\nSuccessfully connected and authenticated!")
-		case <-time.After(3 * time.Minute):
+		case <-time.After(10 * time.Minute):
 			logger.Errorf("Timeout waiting for QR code scan")
 			return
 		}
@@ -1010,7 +1018,7 @@ func main() {
 	fmt.Println("\n✓ Connected to WhatsApp! Type 'help' for commands.")
 
 	// Start REST API server
-	startRESTServer(client, messageStore, 8080)
+	startRESTServer(client, messageStore, bridgePort())
 
 	// Create a channel to keep the main goroutine alive
 	exitChan := make(chan os.Signal, 1)

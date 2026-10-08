@@ -126,38 +126,43 @@ func runSendCommand(args []string) int {
 		return 2
 	}
 
-	payload := map[string]string{
-		"recipient":   normalizePhone(*to),
-		"message":     *text,
-		"approved_by": *approvedBy,
+	out, err := sendViaBridge(*to, *text, *file, *approvedBy)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
-	if *file != "" {
-		abs, err := filepath.Abs(*file)
-		if err == nil {
-			if st, statErr := os.Stat(abs); statErr != nil || st.IsDir() {
-				err = fmt.Errorf("no existe el archivo")
-			}
-		}
+	fmt.Println(out)
+	return 0
+}
+
+// sendViaBridge posts to the running bridge's REST API, so approval, allowlist, daily cap and the send
+// log apply the same way to the CLI, the MCP server and the web outbox.
+func sendViaBridge(to, text, file, approvedBy string) (string, error) {
+	payload := map[string]string{
+		"recipient":   normalizePhone(to),
+		"message":     text,
+		"approved_by": approvedBy,
+	}
+	if file != "" {
+		abs, err := filepath.Abs(file)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "No existe el archivo: %s\n", *file)
-			return 1
+			return "", fmt.Errorf("no existe el archivo: %s", file)
+		}
+		if st, err := os.Stat(abs); err != nil || st.IsDir() {
+			return "", fmt.Errorf("no existe el archivo: %s", file)
 		}
 		payload["media_path"] = abs
 	}
-
 	body, _ := json.Marshal(payload)
 	url := fmt.Sprintf("http://127.0.0.1:%d/api/send", bridgePort())
 	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "El bridge no está en marcha: arráncalo antes de enviar.")
-		return 1
+		return "", fmt.Errorf("el bridge no está en marcha: arráncalo antes de enviar")
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "RECHAZADO %d: %s\n", resp.StatusCode, strings.TrimSpace(string(out)))
-		return 1
+		return "", fmt.Errorf("RECHAZADO %d: %s", resp.StatusCode, strings.TrimSpace(string(out)))
 	}
-	fmt.Println(strings.TrimSpace(string(out)))
-	return 0
+	return strings.TrimSpace(string(out)), nil
 }

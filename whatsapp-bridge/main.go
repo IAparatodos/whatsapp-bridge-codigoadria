@@ -687,7 +687,21 @@ func extractDirectPathFromURL(url string) string {
 }
 
 // --- AdrIA guardrails: allowlist + human approval + daily cap + append-only log ---
-const sendDailyCap = 25
+// dailyCap reads "tope_diario" from store/config.json; 25 when missing. A CRM that sends reminders may
+// need more, so it is set per client instead of compiled in.
+func dailyCap() int {
+	data, err := os.ReadFile("store/config.json")
+	if err != nil {
+		return 25
+	}
+	var cfg struct {
+		TopeDiario int `json:"tope_diario"`
+	}
+	if json.Unmarshal(data, &cfg) != nil || cfg.TopeDiario <= 0 {
+		return 25
+	}
+	return cfg.TopeDiario
+}
 
 func normalizeRecipientJID(recipient string) string {
 	if strings.Contains(recipient, "@") {
@@ -791,7 +805,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 			http.Error(w, "Recipient not in send allowlist (store/send-allowlist.json)", http.StatusForbidden)
 			return
 		}
-		if sendsToday() >= sendDailyCap {
+		if sendsToday() >= dailyCap() {
 			fmt.Println("BLOCKED send: daily cap reached")
 			appendSendLog("blocked_429", "daily cap reached", jid, req.Message, req.MediaPath, req.ApprovedBy)
 			http.Error(w, "Daily send cap reached", http.StatusTooManyRequests)
@@ -886,8 +900,13 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 
 func main() {
 	chdirToExecutable()
-	if len(os.Args) > 1 && os.Args[1] == "send" {
-		os.Exit(runSendCommand(os.Args[2:]))
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "send":
+			os.Exit(runSendCommand(os.Args[2:]))
+		case "mcp":
+			os.Exit(runMCPServer())
+		}
 	}
 
 	// Set up logger
@@ -1462,6 +1481,8 @@ func placeholderWaveform(duration uint32) []byte {
 // sqliteDSN builds the connection string for the pure-Go driver. foreign_keys keeps whatsmeow's
 // cascades working and busy_timeout avoids "database is locked" when the event handler and the
 // REST API write at the same time. No WAL: the shop review copies messages.db as a single file.
+// _time_format=sqlite writes timestamps as "2006-01-02 15:04:05-07:00", the format the cgo driver used
+// and the one every reader of messages.db parses; without it times come out as Go's String() form.
 func sqliteDSN(path string) string {
-	return "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)"
+	return "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_time_format=sqlite"
 }

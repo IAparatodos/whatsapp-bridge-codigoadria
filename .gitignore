@@ -1,0 +1,9 @@
+*.db
+claude_desktop_config.json
+whatsapp.log
+# Local state: WhatsApp session, messages, send log and allowlist. Never commit.
+whatsapp-bridge/store/
+# Build output
+whatsapp-bridge/whatsapp-bridge
+whatsapp-bridge/whatsapp-bridge.old
+whatsapp-bridge/whatsapp-bridge.new

@@ -123,6 +123,9 @@ func (store *MessageStore) StoreMessage(id, chatJID, sender, content string, tim
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, chatJID, sender, content, timestamp, isFromMe, mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength,
 	)
+	if err == nil {
+		webEnqueue(store, id, chatJID, sender, content, timestamp.Format(time.RFC3339), isFromMe, mediaType, filename)
+	}
 	return err
 }
 
@@ -373,10 +376,22 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 	}
 
 	// Send message
-	_, err = client.SendMessage(context.Background(), recipientJID, msg)
+	sendResp, err := client.SendMessage(context.Background(), recipientJID, msg)
 
 	if err != nil {
 		return false, fmt.Sprintf("Error sending message: %v", err)
+	}
+
+	// Messages sent through the API do not come back as events, so store them here: they show up when
+	// reading the chat and reach the linked web like any other message.
+	if sentStore != nil && client.Store.ID != nil {
+		kind, name := sentMediaKind(mediaPath)
+		chat := recipientJID.String()
+		var existing string
+		_ = sentStore.db.QueryRow("SELECT COALESCE(name,'') FROM chats WHERE jid = ?", chat).Scan(&existing)
+		_ = sentStore.StoreChat(chat, existing, sendResp.Timestamp)
+		_ = sentStore.StoreMessage(sendResp.ID, chat, client.Store.ID.User, message, sendResp.Timestamp, true,
+			kind, name, "", nil, nil, nil, 0)
 	}
 
 	return true, fmt.Sprintf("Message sent to %s", recipient)
@@ -906,6 +921,8 @@ func main() {
 			os.Exit(runSendCommand(os.Args[2:]))
 		case "mcp":
 			os.Exit(runMCPServer())
+		case "conectar-web":
+			os.Exit(runConnectWeb(os.Args[2:]))
 		}
 	}
 
@@ -961,6 +978,8 @@ func main() {
 		return
 	}
 	defer messageStore.Close()
+	sentStore = messageStore
+	startWebSync(messageStore)
 
 	// Setup event handling for messages and history sync
 	client.AddEventHandler(func(evt interface{}) {

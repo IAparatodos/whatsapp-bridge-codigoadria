@@ -166,3 +166,24 @@ func sendViaBridge(to, text, file, approvedBy string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// sentStore lets sendWhatsAppMessage record what it sends; set once the message store is open.
+var sentStore *MessageStore
+
+// sentMediaKind maps an attachment path to the media_type/filename stored for received messages.
+func sentMediaKind(path string) (string, string) {
+	if path == "" {
+		return "", ""
+	}
+	name := filepath.Base(path)
+	switch strings.ToLower(strings.TrimPrefix(filepath.Ext(path), ".")) {
+	case "jpg", "jpeg", "png", "gif", "webp":
+		return "image", name
+	case "mp4", "avi", "mov":
+		return "video", name
+	case "ogg":
+		return "audio", name
+	default:
+		return "document", name
+	}
+}

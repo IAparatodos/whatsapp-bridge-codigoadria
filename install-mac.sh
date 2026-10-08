@@ -45,6 +45,38 @@ cat > "$PLIST" <<EOF
 EOF
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 
+echo "→ Conectando con Claude…"
+# Skill: lets Claude Code use WhatsApp and wire it into the client's web apps.
+mkdir -p "$HOME/.claude/skills/whatsapp-codigoadria"
+curl -fsSL "https://raw.githubusercontent.com/$REPO/main/skill/whatsapp-codigoadria/SKILL.md" \
+  -o "$HOME/.claude/skills/whatsapp-codigoadria/SKILL.md" || echo "  (no pude bajar la skill; se puede reinstalar luego)"
+
+# Claude Code: MCP server for the user, available in every project.
+if command -v claude >/dev/null 2>&1; then
+  claude mcp remove --scope user whatsapp >/dev/null 2>&1 || true
+  claude mcp add --scope user whatsapp -- "$DIR/whatsapp-bridge" mcp >/dev/null && echo "  ✓ Claude Code"
+fi
+
+# Claude Desktop: merge our server into its config without touching the rest.
+DESKTOP_CFG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+if [ -d "$HOME/Library/Application Support/Claude" ]; then
+  osascript -l JavaScript - "$DESKTOP_CFG" "$DIR/whatsapp-bridge" <<'JXA' && echo "  ✓ Claude Desktop (reinícialo para verlo)"
+ObjC.import('Foundation');
+function run(argv) {
+  const [path, exe] = argv;
+  const fm = $.NSFileManager.defaultManager;
+  let cfg = {};
+  if (fm.fileExistsAtPath(path)) {
+    const txt = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null).js;
+    try { cfg = JSON.parse(txt); } catch (e) { throw new Error('claude_desktop_config.json no es JSON válido; no lo toco'); }
+  }
+  cfg.mcpServers = cfg.mcpServers || {};
+  cfg.mcpServers.whatsapp = { command: exe, args: ['mcp'] };
+  $(JSON.stringify(cfg, null, 2)).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null);
+}
+JXA
+fi
+
 echo "→ Arrancando…"
 for _ in $(seq 1 40); do
   if [ -f "$DIR/store/qr.html" ] || grep -q "Connected to WhatsApp" "$DIR/bridge.log" 2>/dev/null; then break; fi

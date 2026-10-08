@@ -18,7 +18,8 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	// Pure-Go SQLite: no C compiler needed, so the bridge builds for Windows from any machine.
+	_ "modernc.org/sqlite"
 	"github.com/mdp/qrterminal"
 
 	"bytes"
@@ -55,7 +56,7 @@ func NewMessageStore() (*MessageStore, error) {
 	}
 
 	// Open SQLite database for messages
-	db, err := sql.Open("sqlite3", "file:store/messages.db?_foreign_keys=on")
+	db, err := sql.Open("sqlite", sqliteDSN("store/messages.db"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open message database: %v", err)
 	}
@@ -896,8 +897,14 @@ func main() {
 		return
 	}
 
-	container, err := sqlstore.New(context.Background(), "sqlite3", "file:store/whatsapp.db?_foreign_keys=on", dbLog)
+	sessionDB, err := sql.Open("sqlite", sqliteDSN("store/whatsapp.db"))
 	if err != nil {
+		logger.Errorf("Failed to open session database: %v", err)
+		return
+	}
+	// whatsmeow only knows the "sqlite3" dialect name; the SQL is the same with the pure-Go driver.
+	container := sqlstore.NewWithDB(sessionDB, "sqlite3", dbLog)
+	if err := container.Upgrade(context.Background()); err != nil {
 		logger.Errorf("Failed to connect to database: %v", err)
 		return
 	}
@@ -1442,4 +1449,11 @@ func placeholderWaveform(duration uint32) []byte {
 	}
 
 	return waveform
+}
+
+// sqliteDSN builds the connection string for the pure-Go driver. foreign_keys keeps whatsmeow's
+// cascades working and busy_timeout avoids "database is locked" when the event handler and the
+// REST API write at the same time. No WAL: the shop review copies messages.db as a single file.
+func sqliteDSN(path string) string {
+	return "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)"
 }
